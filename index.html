@@ -1,0 +1,696 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BookAnEPC Live Revenue Dashboard</title>
+  <style>
+    :root {
+      --bg: #0d1f16;
+      --panel: #102519;
+      --panel-2: #0f2017;
+      --line: rgba(126, 203, 154, 0.18);
+      --line-strong: rgba(126, 203, 154, 0.42);
+      --green: #2ecc71;
+      --gold: #f9c74f;
+      --red: #ff5f56;
+      --muted: #8aa894;
+      --text: #ecf7ef;
+      --sub: #bdd8c6;
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 8% 0%, rgba(46, 204, 113, 0.16), transparent 34rem),
+        radial-gradient(circle at 86% 4%, rgba(249, 199, 79, 0.08), transparent 32rem),
+        var(--bg);
+      color: var(--text);
+    }
+
+    .app {
+      width: min(1640px, calc(100vw - 28px));
+      margin: 0 auto;
+      padding: 18px 0 30px;
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 16px;
+      align-items: center;
+      padding: 12px 0 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(1.35rem, 2vw, 2.35rem);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin-top: 6px;
+      color: var(--sub);
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      font-size: 0.94rem;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 9px;
+      justify-content: flex-end;
+      color: var(--sub);
+      font-size: 0.86rem;
+    }
+
+    .pill {
+      border: 1px solid var(--line);
+      background: rgba(15, 35, 24, 0.78);
+      min-height: 34px;
+      padding: 8px 10px;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 12px currentColor;
+      flex: 0 0 auto;
+    }
+
+    .dot.gold { background: var(--gold); color: var(--gold); }
+    .dot.red { background: var(--red); color: var(--red); }
+
+    main {
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 16px;
+    }
+
+    section, .kpi {
+      background: linear-gradient(180deg, rgba(18, 46, 30, 0.94), rgba(12, 31, 22, 0.96));
+      border: 1px solid var(--line);
+      min-width: 0;
+    }
+
+    section { padding: 14px; }
+
+    .kpis {
+      grid-column: span 12;
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .kpi {
+      min-height: 114px;
+      padding: 14px;
+      overflow: hidden;
+    }
+
+    .label {
+      color: var(--muted);
+      text-transform: uppercase;
+      font-size: 0.74rem;
+      letter-spacing: 0;
+    }
+
+    .value {
+      margin-top: 10px;
+      font-size: clamp(1.55rem, 2.2vw, 2.35rem);
+      line-height: 1;
+      font-weight: 820;
+      letter-spacing: 0;
+    }
+
+    .note {
+      margin-top: 8px;
+      color: var(--sub);
+      font-size: 0.82rem;
+    }
+
+    .good { color: var(--green); }
+    .warn { color: var(--gold); }
+    .bad { color: var(--red); }
+
+    .grid-4 { grid-column: span 4; }
+    .grid-5 { grid-column: span 5; }
+    .grid-7 { grid-column: span 7; }
+    .grid-8 { grid-column: span 8; }
+    .grid-12 { grid-column: span 12; }
+
+    .section-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: baseline;
+      margin-bottom: 12px;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 0.92rem;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+
+    .mini {
+      color: var(--muted);
+      font-size: 0.78rem;
+      white-space: nowrap;
+    }
+
+    .stat-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .stat-line {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px;
+      border: 1px solid var(--line);
+      background: rgba(0, 0, 0, 0.14);
+    }
+
+    .stat-line span { color: var(--muted); }
+    .stat-line strong { color: var(--text); text-align: right; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.83rem;
+    }
+
+    th, td {
+      padding: 10px 8px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      background: rgba(0, 0, 0, 0.18);
+      position: sticky;
+      top: 0;
+    }
+
+    td { color: var(--sub); }
+    td strong { color: var(--text); }
+
+    .table-wrap {
+      max-height: 360px;
+      overflow: auto;
+      border: 1px solid var(--line);
+    }
+
+    .bar {
+      height: 10px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--line);
+      margin-top: 10px;
+      overflow: hidden;
+    }
+
+    .bar > div {
+      height: 100%;
+      width: 0;
+      background: linear-gradient(90deg, var(--green), var(--gold));
+      transition: width 240ms ease;
+    }
+
+    .stack {
+      display: grid;
+      gap: 8px;
+    }
+
+    .row-card {
+      padding: 10px;
+      border: 1px solid var(--line);
+      background: rgba(0, 0, 0, 0.12);
+    }
+
+    .row-card strong {
+      display: block;
+      color: var(--text);
+      margin-bottom: 3px;
+    }
+
+    .row-card span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+
+    .badge {
+      display: inline-flex;
+      border: 1px solid var(--line-strong);
+      color: var(--sub);
+      padding: 4px 7px;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .error {
+      grid-column: span 12;
+      display: none;
+      border: 1px solid rgba(255, 95, 86, 0.48);
+      background: rgba(255, 95, 86, 0.08);
+      color: #ffd0cc;
+      padding: 12px 14px;
+    }
+
+    .error.show { display: block; }
+
+    @media (max-width: 1180px) {
+      .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .grid-4, .grid-5, .grid-7, .grid-8 { grid-column: span 12; }
+    }
+
+    @media (max-width: 760px) {
+      .app { width: min(100vw - 18px, 1640px); }
+      header { grid-template-columns: 1fr; }
+      .meta { justify-content: flex-start; }
+      .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 520px) {
+      .kpis { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div>
+        <h1>BookAnEPC Live Revenue Dashboard</h1>
+        <div class="subtitle">
+          <span>Real send log</span>
+          <span class="warn">Daily queue</span>
+          <span>Website enquiries</span>
+          <span>Replies</span>
+        </div>
+      </div>
+      <div class="meta">
+        <div class="pill"><span class="dot gold" id="syncDot"></span><span id="syncStatus">Syncing</span></div>
+        <div class="pill">London time <strong id="clock">--:--:--</strong></div>
+        <div class="pill">Last synced <strong id="lastSynced">never</strong></div>
+      </div>
+    </header>
+
+    <main>
+      <div class="error" id="errorBox"></div>
+
+      <div class="kpis">
+        <div class="kpi">
+          <div class="label">Verified real emails today</div>
+          <div class="value good" id="realSentToday">0</div>
+          <div class="note">From Email Log only</div>
+        </div>
+        <div class="kpi">
+          <div class="label">Owner/test sends today</div>
+          <div class="value warn" id="testSentToday">0</div>
+          <div class="note">Not counted as client outreach</div>
+        </div>
+        <div class="kpi">
+          <div class="label">Queue ready</div>
+          <div class="value" id="queueReady">0</div>
+          <div class="note">Waiting to send</div>
+        </div>
+        <div class="kpi">
+          <div class="label">Website leads today</div>
+          <div class="value good" id="websiteToday">0</div>
+          <div class="note">From landing-page enquiries</div>
+        </div>
+        <div class="kpi">
+          <div class="label">Replies captured</div>
+          <div class="value" id="replyCount">0</div>
+          <div class="note">Reply tracking tab</div>
+        </div>
+        <div class="kpi">
+          <div class="label">30/day progress</div>
+          <div class="value" id="dailyProgress">0%</div>
+          <div class="note">Real client sends only</div>
+        </div>
+      </div>
+
+      <section class="grid-4">
+        <div class="section-title">
+          <h2>Truth Check</h2>
+          <span class="mini">No hardcoded sends</span>
+        </div>
+        <div class="stat-list">
+          <div class="stat-line"><span>Total real client sends</span><strong id="realSentTotal">0</strong></div>
+          <div class="stat-line"><span>Total owner/test sends</span><strong id="testSentTotal">0</strong></div>
+          <div class="stat-line"><span>Queued leads total</span><strong id="queueTotal">0</strong></div>
+          <div class="stat-line"><span>Website leads total</span><strong id="websiteTotal">0</strong></div>
+          <div class="stat-line"><span>Real sends last 7 days</span><strong id="realSentWeek">0</strong></div>
+        </div>
+        <div class="bar"><div id="capBar"></div></div>
+        <div class="note" id="capNote">0 of 30 real client emails sent today</div>
+      </section>
+
+      <section class="grid-8">
+        <div class="section-title">
+          <h2>Daily Send Queue</h2>
+          <span class="mini">Top waiting revenue leads</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Rank</th>
+                <th>Company</th>
+                <th>Email</th>
+                <th>Borough</th>
+                <th>Hook</th>
+              </tr>
+            </thead>
+            <tbody id="queueTable"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="grid-7">
+        <div class="section-title">
+          <h2>Recent Email Log</h2>
+          <span class="mini">Confirmed send records</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Email</th>
+                <th>Company</th>
+              </tr>
+            </thead>
+            <tbody id="emailTable"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="grid-5">
+        <div class="section-title">
+          <h2>Website Leads</h2>
+          <span class="mini">Landing page capture</span>
+        </div>
+        <div class="stack" id="websiteList"></div>
+      </section>
+
+      <section class="grid-12">
+        <div class="section-title">
+          <h2>Recommended Next Action</h2>
+          <span class="mini">Revenue first</span>
+        </div>
+        <div class="row-card">
+          <strong id="nextActionTitle">Loading</strong>
+          <span id="nextActionBody">Checking current automation state.</span>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const CONFIG = {
+      SHEET_ID: "1We_XZZvEKHPcFEF80Yaa1-mE0aQbZ2KI-vmvYMnySxQ",
+      API_KEY: "AIzaSyBfN6tP7eVCBZN3hUWv1Dw0PoB7pgHYg_4",
+      DAILY_TARGET: 30,
+      OWNER_EMAILS: ["aftabkhowaja@hotmail.co.uk", "aftab@bookanepc.co.uk", "info@bookanepc.co.uk"],
+      AUTO_REFRESH_MS: 60000
+    };
+
+    const tabs = {
+      emailLog: "Email Log",
+      queue: "Daily Send Queue",
+      website: "Website Leads",
+      replies: "Replies",
+      metrics: "Dashboard Metrics"
+    };
+
+    const el = (id) => document.getElementById(id);
+
+    function londonDateParts(date = new Date()) {
+      const parts = new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Europe/London",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+      }).formatToParts(date);
+      return Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    }
+
+    function todayKey() {
+      const p = londonDateParts();
+      return `${p.year}-${p.month}-${p.day}`;
+    }
+
+    function dateKey(value) {
+      const date = parseDate(value);
+      if (!date) return "";
+      const p = londonDateParts(date);
+      return `${p.year}-${p.month}-${p.day}`;
+    }
+
+    function parseDate(value) {
+      const text = String(value || "").trim();
+      if (!text) return null;
+      const parsed = Date.parse(text);
+      if (!Number.isNaN(parsed)) return new Date(parsed);
+      const match = text.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})(?:\s+(\d{1,2}):(\d{2}))?/);
+      if (match) {
+        const year = Number(match[3].length === 2 ? `20${match[3]}` : match[3]);
+        return new Date(year, Number(match[2]) - 1, Number(match[1]), Number(match[4] || 0), Number(match[5] || 0));
+      }
+      return null;
+    }
+
+    function field(row, names) {
+      for (const name of names) {
+        const key = normalise(name);
+        if (row[key]) return row[key];
+      }
+      return "";
+    }
+
+    function normalise(value) {
+      return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+    }
+
+    function rowsFromValues(values = []) {
+      if (values.length < 2) return [];
+      const headers = values[0].map(normalise);
+      return values.slice(1)
+        .filter((row) => row.some((cell) => String(cell || "").trim()))
+        .map((row) => Object.fromEntries(headers.map((header, index) => [header, String(row[index] || "").trim()])));
+    }
+
+    async function fetchTab(tabName) {
+      const range = encodeURIComponent(`${tabName}!A:Z`);
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SHEET_ID}/values/${range}?key=${CONFIG.API_KEY}`;
+      const response = await fetch(url, { cache: "no-store" });
+      if (!response.ok) throw new Error(`${tabName}: Google Sheets API ${response.status}`);
+      const data = await response.json();
+      return rowsFromValues(data.values || []);
+    }
+
+    async function loadData() {
+      const results = await Promise.allSettled([
+        fetchTab(tabs.emailLog),
+        fetchTab(tabs.queue),
+        fetchTab(tabs.website),
+        fetchTab(tabs.replies),
+        fetchTab(tabs.metrics)
+      ]);
+
+      const [emailLog, queue, website, replies, metrics] = results.map((result) => result.status === "fulfilled" ? result.value : []);
+      const rejected = results.find((result) => result.status === "rejected");
+      if (rejected) throw rejected.reason;
+      return { emailLog, queue, website, replies, metrics };
+    }
+
+    function isSent(row) {
+      return /sent|delivered|success/i.test(field(row, ["status", "send_status", "email_status"]));
+    }
+
+    function emailOf(row) {
+      return field(row, ["email", "recipient", "recipient_email", "to"]);
+    }
+
+    function isOwnerOrTest(row) {
+      const email = emailOf(row).toLowerCase();
+      const company = field(row, ["company_name", "company", "name"]).toLowerCase();
+      return CONFIG.OWNER_EMAILS.some((owner) => email === owner.toLowerCase()) || /test|owner|preview/.test(company);
+    }
+
+    function sentAt(row) {
+      return field(row, ["sent_at", "timestamp", "date", "created_at"]);
+    }
+
+    function isUnsentQueueRow(row) {
+      const status = field(row, ["status", "send_status", "email_status", "outreach_status"]);
+      return !/sent|complete|delivered|done/i.test(status);
+    }
+
+    function render(data) {
+      const today = todayKey();
+      const sentRows = data.emailLog.filter(isSent);
+      const realSent = sentRows.filter((row) => !isOwnerOrTest(row));
+      const testSent = sentRows.filter(isOwnerOrTest);
+      const realToday = realSent.filter((row) => dateKey(sentAt(row)) === today);
+      const testToday = testSent.filter((row) => dateKey(sentAt(row)) === today);
+      const realWeek = realSent.filter((row) => {
+        const date = parseDate(sentAt(row));
+        return date && Date.now() - date.getTime() <= 7 * 86400000;
+      });
+      const queueReady = data.queue.filter(isUnsentQueueRow);
+      const websiteToday = data.website.filter((row) => {
+        const value = field(row, ["received_at", "submitted_at", "created_at", "timestamp", "date"]);
+        return dateKey(value) === today;
+      });
+
+      set("realSentToday", realToday.length);
+      set("testSentToday", testToday.length);
+      set("queueReady", queueReady.length);
+      set("websiteToday", websiteToday.length);
+      set("replyCount", data.replies.length);
+      set("realSentTotal", realSent.length);
+      set("testSentTotal", testSent.length);
+      set("queueTotal", data.queue.length);
+      set("websiteTotal", data.website.length);
+      set("realSentWeek", realWeek.length);
+
+      const progress = Math.min(100, Math.round((realToday.length / CONFIG.DAILY_TARGET) * 100));
+      set("dailyProgress", `${progress}%`);
+      el("capBar").style.width = `${progress}%`;
+      set("capNote", `${realToday.length} of ${CONFIG.DAILY_TARGET} real client emails sent today`);
+
+      renderQueue(queueReady.slice(0, 12));
+      renderEmails(sentRows.slice(-12).reverse());
+      renderWebsite(data.website.slice(-5).reverse());
+      renderNextAction({ realToday, testToday, queueReady, websiteToday });
+    }
+
+    function set(id, value) {
+      el(id).textContent = String(value);
+    }
+
+    function renderQueue(rows) {
+      el("queueTable").innerHTML = rows.length ? rows.map((row, index) => `
+        <tr>
+          <td>${safe(field(row, ["revenue_batch_rank", "rank"]) || index + 1)}</td>
+          <td><strong>${safe(field(row, ["company_name", "name", "business_name"]) || "Unknown")}</strong></td>
+          <td>${safe(emailOf(row))}</td>
+          <td>${safe(field(row, ["borough", "area"]) || "-")}</td>
+          <td>${safe(field(row, ["sales_hook", "recommended_action"]) || "-")}</td>
+        </tr>
+      `).join("") : `<tr><td colspan="5">No queued leads found.</td></tr>`;
+    }
+
+    function renderEmails(rows) {
+      el("emailTable").innerHTML = rows.length ? rows.map((row) => `
+        <tr>
+          <td>${safe(sentAt(row) || "-")}</td>
+          <td><span class="badge">${isOwnerOrTest(row) ? "owner/test" : "real client"}</span></td>
+          <td>${safe(field(row, ["status", "send_status"]) || "-")}</td>
+          <td>${safe(emailOf(row) || "-")}</td>
+          <td><strong>${safe(field(row, ["company_name", "company", "name"]) || "-")}</strong></td>
+        </tr>
+      `).join("") : `<tr><td colspan="5">No email send records yet.</td></tr>`;
+    }
+
+    function renderWebsite(rows) {
+      el("websiteList").innerHTML = rows.length ? rows.map((row) => {
+        const name = field(row, ["name", "customer_name"]) || "Website enquiry";
+        const service = field(row, ["service", "job_type"]) || "Service not set";
+        const phone = field(row, ["phone", "telephone"]) || "";
+        const email = emailOf(row);
+        const address = field(row, ["address", "property_address"]) || "";
+        return `<div class="row-card">
+          <strong>${safe(name)}</strong>
+          <span>${safe(service)}</span>
+          <span>${safe([phone, email].filter(Boolean).join(" | "))}</span>
+          <span>${safe(address)}</span>
+        </div>`;
+      }).join("") : `<div class="row-card"><strong>No website leads yet</strong><span>New landing-page enquiries will appear here.</span></div>`;
+    }
+
+    function renderNextAction({ realToday, testToday, queueReady, websiteToday }) {
+      if (realToday.length === 0 && queueReady.length > 0) {
+        set("nextActionTitle", "Send first 10 real client emails, then pause");
+        set("nextActionBody", "The queue is ready, but the confirmed Email Log shows zero real client sends today. Send a small live batch first, watch replies, then increase toward 30/day.");
+      } else if (realToday.length > 0 && realToday.length < CONFIG.DAILY_TARGET) {
+        set("nextActionTitle", "Continue controlled sending");
+        set("nextActionBody", `${realToday.length} real client emails are confirmed today. Keep under ${CONFIG.DAILY_TARGET}/day and call the highest-value replies first.`);
+      } else if (websiteToday.length > 0) {
+        set("nextActionTitle", "Call today's website leads");
+        set("nextActionBody", "A website enquiry is warmer than cold outreach. Phone or WhatsApp these first, then use email automation for agent lead generation.");
+      } else {
+        set("nextActionTitle", "Refresh lead supply");
+        set("nextActionBody", "Generate more EPC Register and agent leads, then add them to the Daily Send Queue before the next morning send.");
+      }
+    }
+
+    function safe(value) {
+      return String(value || "").replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      }[char]));
+    }
+
+    async function sync() {
+      el("syncStatus").textContent = "Syncing";
+      el("syncDot").className = "dot gold";
+      el("errorBox").classList.remove("show");
+      try {
+        const data = await loadData();
+        render(data);
+        el("syncStatus").textContent = "Live";
+        el("syncDot").className = "dot";
+        el("lastSynced").textContent = new Date().toLocaleTimeString("en-GB", { timeZone: "Europe/London" });
+      } catch (error) {
+        el("syncStatus").textContent = "Error";
+        el("syncDot").className = "dot red";
+        el("errorBox").textContent = error.message;
+        el("errorBox").classList.add("show");
+      }
+    }
+
+    function tick() {
+      el("clock").textContent = new Date().toLocaleTimeString("en-GB", { timeZone: "Europe/London" });
+    }
+
+    tick();
+    setInterval(tick, 1000);
+    sync();
+    setInterval(sync, CONFIG.AUTO_REFRESH_MS);
+  </script>
+</body>
+</html>
