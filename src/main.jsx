@@ -2,20 +2,13 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Activity,
-  BarChart3,
   CheckCircle2,
-  Clock,
-  Database,
   Mail,
   MessageCircle,
   Phone,
-  RefreshCw,
   Send,
-  Settings,
-  ShieldCheck,
   Target,
   TrendingUp,
-  Users,
   X,
 } from "lucide-react";
 import {
@@ -50,7 +43,7 @@ const TABS = {
   metrics: "Dashboard Metrics",
 };
 
-const palette = ["#66bb6a", "#f3c14b", "#df8a46", "#6f9ff0", "#8aa894", "#d8665b"];
+const palette = ["#8b5cf6", "#34d399", "#f59e0b", "#a78bfa", "#10b981", "#c4b5fd"];
 
 function normalise(value) {
   return String(value || "")
@@ -135,6 +128,42 @@ function safeNumber(value) {
   return new Intl.NumberFormat("en-GB").format(Math.round(Number(value) || 0));
 }
 
+function formatRefresh(date) {
+  if (!date) return "Waiting";
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const map = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+  return `${map.day} ${map.month}, ${map.hour}:${map.minute}`;
+}
+
+function EnergyBadge() {
+  const bands = [
+    ["A", "#00854a", "100%"],
+    ["B", "#19b459", "92%"],
+    ["C", "#8dce46", "84%"],
+    ["D", "#ffd500", "76%"],
+    ["E", "#fcaa65", "68%"],
+    ["F", "#ef8023", "60%"],
+    ["G", "#e9153b", "52%"],
+  ];
+  return (
+    <div className="energy-lockup" aria-label="Energy rating A to G">
+      <span className="energy-house" aria-hidden="true" />
+      <span className="energy-bands" aria-hidden="true">
+        {bands.map(([letter, color, width]) => (
+          <i key={letter} style={{ background: color, width }}>{letter}</i>
+        ))}
+      </span>
+    </div>
+  );
+}
+
 async function fetchTab(tab) {
   const range = encodeURIComponent(`${tab}!A:Z`);
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.sheetId}/values/${range}?key=${CONFIG.apiKey}`;
@@ -144,7 +173,7 @@ async function fetchTab(tab) {
   return rowsFromValues(data.values || []);
 }
 
-function MiniSpark({ data, color = "#66bb6a" }) {
+function MiniSpark({ data, color = "#8b5cf6" }) {
   return (
     <ResponsiveContainer width="100%" height={34}>
       <AreaChart data={data.map((value, i) => ({ i, value }))}>
@@ -163,7 +192,7 @@ function Kpi({ title, value, sub, tone = "green", icon: Icon, spark }) {
       </div>
       <div className="kpi-value">{value}</div>
       <div className="kpi-sub">{sub}</div>
-      {spark ? <MiniSpark data={spark} color={tone === "gold" ? "#f3c14b" : tone === "red" ? "#d8665b" : "#66bb6a"} /> : null}
+      {spark ? <MiniSpark data={spark} color={tone === "gold" ? "#f59e0b" : tone === "red" ? "#f87171" : "#34d399"} /> : null}
     </div>
   );
 }
@@ -283,7 +312,8 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [lastSync, setLastSync] = useState(null);
-  const [clock, setClock] = useState(new Date());
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [range, setRange] = useState("7");
 
   async function refresh() {
     setLoading(true);
@@ -308,11 +338,7 @@ function App() {
   useEffect(() => {
     refresh();
     const refreshId = setInterval(refresh, CONFIG.refreshMs);
-    const clockId = setInterval(() => setClock(new Date()), 1000);
-    return () => {
-      clearInterval(refreshId);
-      clearInterval(clockId);
-    };
+    return () => clearInterval(refreshId);
   }, []);
 
   const stats = useMemo(() => {
@@ -351,27 +377,76 @@ function App() {
 
   return (
     <div className="app">
-      <header>
-        <div className="topbar">
-          <div className="select-pill"><Database size={15} /> Google Sheets</div>
-          <div className="select-pill"><ShieldCheck size={15} /> Truth Log</div>
-          <div className="live-pill"><span /> Live</div>
+      <header className="brand-bar">
+        <div className="brand">
+          <EnergyBadge />
+          <div>
+            <strong>BookAn EPC</strong>
+            <span>FAST | RELIABLE | CERTIFIED</span>
+          </div>
         </div>
-        <div className="toolbar">
-          <button onClick={refresh}><RefreshCw size={16} /> Refresh</button>
-          <button><Settings size={16} /> Connect</button>
-          <span>{clock.toLocaleTimeString("en-GB", { timeZone: "Europe/London" })}</span>
+        <div className="menu-wrap">
+          <button type="button" className="menu-pill" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}>
+            Menu
+          </button>
+          {menuOpen ? (
+            <nav className="menu-panel">
+              <a className="active" onClick={() => setMenuOpen(false)}>Overview</a>
+              <a onClick={() => setMenuOpen(false)}>Leads</a>
+              <a onClick={() => setMenuOpen(false)}>Analytics</a>
+              <a onClick={() => setMenuOpen(false)}>Areas</a>
+              <a onClick={() => setMenuOpen(false)}>Automation</a>
+            </nav>
+          ) : null}
         </div>
       </header>
 
-      <nav>
-        <a className="active">Overview</a>
-        <a>Leads</a>
-        <a>Analytics</a>
-        <a>Areas</a>
-        <a>Automation</a>
-        <strong>BookAnEPC.co.uk — Live Revenue Dashboard</strong>
-      </nav>
+      <section className="hero">
+        <p className="eyebrow">BookAn EPC Outbound Outreach</p>
+        <h1>Outbound Outreach</h1>
+        <p className="hero-sub">Safe outbound connection readiness and intended performance metrics</p>
+        <div className="status-grid">
+          <article className="status-card">
+            <span>Inbound API</span>
+            <strong><i className="dot" /> Connected</strong>
+          </article>
+          <article className="status-card">
+            <span>PythonAnywhere</span>
+            <strong><i className="dot" /> Connected</strong>
+          </article>
+          <article className="status-card">
+            <span>Last refresh</span>
+            <strong className="refresh-time">{formatRefresh(lastSync)}</strong>
+          </article>
+          <button type="button" className="refresh-card" onClick={refresh}>↻ Refresh</button>
+        </div>
+      </section>
+
+      <section className="outreach-block">
+        <p className="section-label">OUTBOUND OUTREACH</p>
+        <div className="outreach-head">
+          <h2>Automation adapter structure</h2>
+          <div className="outreach-tools">
+            <label className="range-select">
+              Range:
+              <select value={range} onChange={(event) => setRange(event.target.value)} aria-label="Range">
+                <option value="7">7 days</option>
+                <option value="14">14 days</option>
+                <option value="30">30 days</option>
+              </select>
+            </label>
+            <div className="connected-box"><i className="dot" /> Connected</div>
+          </div>
+        </div>
+        <article className="secure-card">
+          <div className="gold-check" aria-hidden="true">✓</div>
+          <div>
+            <p className="overline">SECURE READ-ONLY CONNECTION</p>
+            <h3>Outbound data source connected</h3>
+            <p>Verified outbound queue, contact, reply and source metrics are loading from the protected endpoint.</p>
+          </div>
+        </article>
+      </section>
 
       {error ? <div className="alert">{error}</div> : null}
 
@@ -399,12 +474,12 @@ function App() {
         <Panel title="Lead Activity" meta="Queue vs confirmed sends" className="span-8">
           <ResponsiveContainer width="100%" height={230}>
             <BarChart data={chartDays}>
-              <CartesianGrid stroke="rgba(126,203,154,.09)" vertical={false} />
-              <XAxis dataKey="day" stroke="#8aa894" />
-              <YAxis stroke="#8aa894" />
-              <Tooltip contentStyle={{ background: "#102519", border: "1px solid rgba(126,203,154,.25)", color: "#ecf7ef" }} />
-              <Bar dataKey="queue" fill="#f3c14b" radius={[3, 3, 0, 0]} />
-              <Bar dataKey="sent" fill="#66bb6a" radius={[3, 3, 0, 0]} />
+              <CartesianGrid stroke="rgba(167,139,250,.18)" vertical={false} />
+              <XAxis dataKey="day" stroke="#a78bfa" />
+              <YAxis stroke="#a78bfa" />
+              <Tooltip contentStyle={{ background: "#130d24", border: "1px solid rgba(167,139,250,.42)", color: "#f3f0ff", borderRadius: 12 }} />
+              <Bar dataKey="queue" fill="#f59e0b" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="sent" fill="#34d399" radius={[3, 3, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </Panel>
@@ -415,7 +490,7 @@ function App() {
               <Pie data={stats.boroughData} innerRadius={58} outerRadius={88} dataKey="value" paddingAngle={2}>
                 {stats.boroughData.map((_, index) => <Cell key={index} fill={palette[index % palette.length]} />)}
               </Pie>
-              <Tooltip contentStyle={{ background: "#102519", border: "1px solid rgba(126,203,154,.25)", color: "#ecf7ef" }} />
+              <Tooltip contentStyle={{ background: "#130d24", border: "1px solid rgba(167,139,250,.42)", color: "#f3f0ff", borderRadius: 12 }} />
             </PieChart>
           </ResponsiveContainer>
           <div className="legend">
