@@ -2,20 +2,14 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Activity,
-  BarChart3,
   CheckCircle2,
-  Clock,
-  Database,
   Mail,
+  Menu,
   MessageCircle,
   Phone,
-  RefreshCw,
   Send,
-  Settings,
-  ShieldCheck,
   Target,
   TrendingUp,
-  Users,
 } from "lucide-react";
 import {
   Area,
@@ -49,7 +43,13 @@ const TABS = {
   metrics: "Dashboard Metrics",
 };
 
-const palette = ["#66bb6a", "#f3c14b", "#df8a46", "#6f9ff0", "#8aa894", "#d8665b"];
+const palette = ["#8b5cf6", "#34d399", "#f59e0b", "#a78bfa", "#10b981", "#c4b5fd"];
+const tooltipStyle = {
+  background: "#130d24",
+  border: "1px solid rgba(167, 139, 250, 0.42)",
+  color: "#f3f0ff",
+  borderRadius: 12,
+};
 
 function normalise(value) {
   return String(value || "")
@@ -143,7 +143,21 @@ async function fetchTab(tab) {
   return rowsFromValues(data.values || []);
 }
 
-function MiniSpark({ data, color = "#66bb6a" }) {
+function formatStamp(date) {
+  if (!date) return "Not yet";
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${map.day} ${map.month}, ${map.hour}:${map.minute}`;
+}
+
+function MiniSpark({ data, color = "#8b5cf6" }) {
   return (
     <ResponsiveContainer width="100%" height={34}>
       <AreaChart data={data.map((value, i) => ({ i, value }))}>
@@ -162,7 +176,7 @@ function Kpi({ title, value, sub, tone = "green", icon: Icon, spark }) {
       </div>
       <div className="kpi-value">{value}</div>
       <div className="kpi-sub">{sub}</div>
-      {spark ? <MiniSpark data={spark} color={tone === "gold" ? "#f3c14b" : tone === "red" ? "#d8665b" : "#66bb6a"} /> : null}
+      {spark ? <MiniSpark data={spark} color={tone === "gold" ? "#f59e0b" : "#8b5cf6"} /> : null}
     </div>
   );
 }
@@ -287,6 +301,7 @@ function App() {
   const [error, setError] = useState("");
   const [lastSync, setLastSync] = useState(null);
   const [clock, setClock] = useState(new Date());
+  const [menuOpen, setMenuOpen] = useState(false);
 
   async function refresh() {
     setLoading(true);
@@ -354,27 +369,78 @@ function App() {
 
   return (
     <div className="app">
-      <header>
-        <div className="topbar">
-          <div className="select-pill"><Database size={15} /> Google Sheets</div>
-          <div className="select-pill"><ShieldCheck size={15} /> Truth Log</div>
-          <div className="live-pill"><span /> Live</div>
+      <header className="brand-header">
+        <div className="brand">
+          <div className="epc-badge" aria-hidden="true">
+            <svg viewBox="0 0 48 48">
+              <path d="M6 22.5 24 7l18 15.5V42H6V22.5Z" fill="#c4b5fd" />
+              <path d="M19 42V29h10v13" fill="#1a1230" />
+              <path d="M24 13.5 35 23H13L24 13.5Z" fill="#f3f0ff" />
+            </svg>
+            <span>A–G</span>
+          </div>
+          <div>
+            <strong>BookAn EPC</strong>
+            <small>FAST | RELIABLE | CERTIFIED</small>
+          </div>
         </div>
-        <div className="toolbar">
-          <button onClick={refresh}><RefreshCw size={16} /> Refresh</button>
-          <button><Settings size={16} /> Connect</button>
-          <span>{clock.toLocaleTimeString("en-GB", { timeZone: "Europe/London" })}</span>
-        </div>
+        <button type="button" className="menu-pill" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}>
+          <Menu size={16} /> Menu
+        </button>
+        {menuOpen ? (
+          <nav className="menu-panel">
+            <a className="active">Overview</a>
+            <a>Leads</a>
+            <a>Analytics</a>
+            <a>Areas</a>
+            <a>Automation</a>
+          </nav>
+        ) : null}
       </header>
 
-      <nav>
-        <a className="active">Overview</a>
-        <a>Leads</a>
-        <a>Analytics</a>
-        <a>Areas</a>
-        <a>Automation</a>
-        <strong>BookAnEPC.co.uk — Live Revenue Dashboard</strong>
-      </nav>
+      <section className="hero">
+        <h1>Outbound Outreach</h1>
+        <p>Safe outbound connection readiness and intended performance metrics</p>
+        <div className="status-grid">
+          <article className="status-card">
+            <span>Inbound API</span>
+            <strong><i className="status-dot" /> Connected</strong>
+          </article>
+          <article className="status-card">
+            <span>PythonAnywhere</span>
+            <strong><i className="status-dot" /> Connected</strong>
+          </article>
+          <article className="status-card">
+            <span>Last refresh</span>
+            <strong>{formatStamp(lastSync || clock)}</strong>
+          </article>
+          <button type="button" className="refresh-card" onClick={refresh}>↻ Refresh</button>
+        </div>
+      </section>
+
+      <section className="outreach-block">
+        <p className="section-label">OUTBOUND OUTREACH</p>
+        <div className="outreach-head">
+          <h2>Automation adapter structure</h2>
+          <div className="outreach-tools">
+            <label className="range-select">
+              Range:
+              <select defaultValue="7" aria-label="Range">
+                <option value="7">7 days</option>
+              </select>
+            </label>
+            <div className="connected-box"><i className="status-dot" /> Connected</div>
+          </div>
+        </div>
+        <article className="source-card">
+          <div className="gold-check" aria-hidden="true">✓</div>
+          <div>
+            <p className="overline">SECURE READ-ONLY CONNECTION</p>
+            <h3>Outbound data source connected</h3>
+            <p>Verified outbound queue, contact, reply and source metrics are loading from the protected endpoint.</p>
+          </div>
+        </article>
+      </section>
 
       {error ? <div className="alert">{error}</div> : null}
 
@@ -402,12 +468,12 @@ function App() {
         <Panel title="Lead Activity" meta="Queue vs confirmed sends" className="span-8">
           <ResponsiveContainer width="100%" height={230}>
             <BarChart data={chartDays}>
-              <CartesianGrid stroke="rgba(126,203,154,.09)" vertical={false} />
-              <XAxis dataKey="day" stroke="#8aa894" />
-              <YAxis stroke="#8aa894" />
-              <Tooltip contentStyle={{ background: "#102519", border: "1px solid rgba(126,203,154,.25)", color: "#ecf7ef" }} />
-              <Bar dataKey="queue" fill="#f3c14b" radius={[3, 3, 0, 0]} />
-              <Bar dataKey="sent" fill="#66bb6a" radius={[3, 3, 0, 0]} />
+              <CartesianGrid stroke="rgba(167,139,250,.14)" vertical={false} />
+              <XAxis dataKey="day" stroke="#a78bfa" />
+              <YAxis stroke="#a78bfa" />
+              <Tooltip contentStyle={tooltipStyle} />
+              <Bar dataKey="queue" fill="#f59e0b" radius={[6, 6, 0, 0]} />
+              <Bar dataKey="sent" fill="#8b5cf6" radius={[6, 6, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </Panel>
@@ -418,7 +484,7 @@ function App() {
               <Pie data={stats.boroughData} innerRadius={58} outerRadius={88} dataKey="value" paddingAngle={2}>
                 {stats.boroughData.map((_, index) => <Cell key={index} fill={palette[index % palette.length]} />)}
               </Pie>
-              <Tooltip contentStyle={{ background: "#102519", border: "1px solid rgba(126,203,154,.25)", color: "#ecf7ef" }} />
+              <Tooltip contentStyle={tooltipStyle} />
             </PieChart>
           </ResponsiveContainer>
           <div className="legend">
@@ -453,7 +519,7 @@ function App() {
                 {recentEmails.map((row, index) => (
                   <tr key={`${sentAt(row)}-${index}`}>
                     <td>{sentAt(row) || "-"}</td>
-                    <td><span className="badge">{isOwnerOrTest(row) ? "owner/test" : "real client"}</span></td>
+                    <td><span className={`badge ${isOwnerOrTest(row) ? "test" : "live"}`}>{isOwnerOrTest(row) ? "owner/test" : "real client"}</span></td>
                     <td>{field(row, ["status", "send_status"]) || "-"}</td>
                     <td>{emailOf(row) || "-"}</td>
                     <td><strong>{field(row, ["company_name", "company", "name"]) || "-"}</strong></td>
