@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Activity,
@@ -7,6 +7,7 @@ import {
   Clock,
   Database,
   Mail,
+  MessageCircle,
   Phone,
   RefreshCw,
   Send,
@@ -175,6 +176,108 @@ function Panel({ title, meta, children, className = "" }) {
       </div>
       {children}
     </section>
+  );
+}
+
+function ChatWidget({ context }) {
+  const [open, setOpen] = useState(false);
+  const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
+  const [messages, setMessages] = useState([
+    {
+      role: "assistant",
+      content: "Ask about today's sends, the queue, website leads, or what to do next.",
+    },
+  ]);
+  const threadRef = useRef(null);
+
+  useEffect(() => {
+    if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight;
+  }, [messages, open, sending]);
+
+  async function onSubmit(event) {
+    event.preventDefault();
+    const text = input.trim();
+    if (!text || sending) return;
+
+    const history = [...messages, { role: "user", content: text }];
+    setMessages(history);
+    setInput("");
+    setSending(true);
+
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: history.filter((message) => !message.error).map(({ role, content }) => ({ role, content })),
+          context,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || `Chat request failed (${response.status}).`);
+      }
+      const reply = String(payload.reply || "").trim();
+      if (!reply) throw new Error("The assistant returned an empty reply.");
+      setMessages((current) => [...current, { role: "assistant", content: reply }]);
+    } catch (err) {
+      setMessages((current) => [
+        ...current,
+        { role: "assistant", error: true, content: err.message || "Could not reach the chat service." },
+      ]);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="chat-widget">
+      {open ? (
+        <section className="chat-window" id="ai-chat-window" aria-label="AI chat">
+          <div className="chat-header">
+            <div>
+              <strong>AI Chat</strong>
+              <span>gpt-4o-mini</span>
+            </div>
+            <button type="button" className="chat-close-btn" onClick={() => setOpen(false)}>
+              Close
+            </button>
+          </div>
+          <div className="chat-messages" ref={threadRef}>
+            {messages.map((message, index) => (
+              <div key={`${message.role}-${index}`} className={`chat-bubble ${message.role}${message.error ? " error" : ""}`}>
+                {message.content}
+              </div>
+            ))}
+            {sending ? <div className="chat-bubble assistant">Thinking...</div> : null}
+          </div>
+          <form className="chat-composer" onSubmit={onSubmit}>
+            <input
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              placeholder="Ask about the dashboard"
+              aria-label="Message"
+              disabled={sending}
+            />
+            <button type="submit" className="chat-send-btn" disabled={sending || !input.trim()}>
+              <Send size={16} />
+              Send
+            </button>
+          </form>
+        </section>
+      ) : null}
+      <button
+        type="button"
+        className="chat-toggle-btn"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        aria-controls="ai-chat-window"
+      >
+        <MessageCircle className="chat-toggle-icon" size={18} aria-hidden="true" />
+        AI Chat
+      </button>
+    </div>
   );
 }
 
@@ -388,6 +491,17 @@ function App() {
           </div>
         </Panel>
       </main>
+      <ChatWidget
+        context={[
+          `Real client emails today: ${stats.realToday.length} of ${CONFIG.dailyTarget}.`,
+          `Owner/test sends today: ${stats.testToday.length}.`,
+          `Queue ready: ${stats.readyQueue.length}.`,
+          `Website leads today: ${stats.websiteToday.length} (${data.website.length} total).`,
+          `Replies captured: ${data.replies.length}.`,
+          `Total real client sends: ${stats.realSent.length}.`,
+          `Likely revenue signal: ${money(stats.likelyRevenue)}.`,
+        ].join(" ")}
+      />
     </div>
   );
 }
