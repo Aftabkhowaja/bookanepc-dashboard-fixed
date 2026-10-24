@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Activity,
@@ -7,6 +7,7 @@ import {
   Clock,
   Database,
   Mail,
+  MessageCircle,
   Phone,
   RefreshCw,
   Send,
@@ -15,6 +16,7 @@ import {
   Target,
   TrendingUp,
   Users,
+  X,
 } from "lucide-react";
 import {
   Area,
@@ -175,6 +177,104 @@ function Panel({ title, meta, children, className = "" }) {
       </div>
       {children}
     </section>
+  );
+}
+
+function ChatWidget() {
+  const [open, setOpen] = useState(false);
+  const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
+  const [chatError, setChatError] = useState("");
+  const [messages, setMessages] = useState([
+    {
+      role: "assistant",
+      content: "Ask me about real client sends, the queue, website leads, or what to do next.",
+    },
+  ]);
+  const threadRef = useRef(null);
+
+  useEffect(() => {
+    const node = threadRef.current;
+    if (node) node.scrollTop = node.scrollHeight;
+  }, [messages, open, sending]);
+
+  async function onSubmit(event) {
+    event.preventDefault();
+    const text = input.trim();
+    if (!text || sending) return;
+
+    const history = [...messages, { role: "user", content: text }];
+    setMessages(history);
+    setInput("");
+    setSending(true);
+    setChatError("");
+
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: history.map((message) => ({ role: message.role, content: message.content })),
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || `Chat request failed (${response.status})`);
+      const reply = String(payload.reply || "").trim() || "I could not find an answer for that.";
+      setMessages((current) => [...current, { role: "assistant", content: reply }]);
+    } catch (err) {
+      setChatError(err.message || "Chat request failed");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="chat-widget">
+      {open ? (
+        <section className="chat-window" id="ai-chat-window" aria-label="AI chat">
+          <div className="chat-header">
+            <div>
+              <strong>AI Chat</strong>
+              <span>Gemini assistant</span>
+            </div>
+            <button type="button" className="chat-close-btn" onClick={() => setOpen(false)} aria-label="Close chat">
+              <X size={16} />
+            </button>
+          </div>
+          <div className="chat-messages" ref={threadRef} aria-live="polite">
+            {messages.map((message, index) => (
+              <div key={`${message.role}-${index}`} className={`chat-bubble ${message.role === "user" ? "user" : "assistant"}`}>
+                {message.content}
+              </div>
+            ))}
+            {sending ? <div className="chat-bubble assistant">Thinking…</div> : null}
+          </div>
+          {chatError ? <div className="chat-error">{chatError}</div> : null}
+          <form className="chat-form" onSubmit={onSubmit}>
+            <input
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              placeholder="Ask about the dashboard"
+              aria-label="Message"
+              disabled={sending}
+            />
+            <button type="submit" disabled={sending || !input.trim()}>
+              <Send size={16} /> Send
+            </button>
+          </form>
+        </section>
+      ) : null}
+      <button
+        type="button"
+        className="chat-toggle-btn"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        aria-controls="ai-chat-window"
+      >
+        <MessageCircle size={18} />
+        AI Chat
+      </button>
+    </div>
   );
 }
 
@@ -388,6 +488,7 @@ function App() {
           </div>
         </Panel>
       </main>
+      <ChatWidget />
     </div>
   );
 }
