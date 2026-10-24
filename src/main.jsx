@@ -238,7 +238,7 @@ function ChatWidget({ context }) {
           <div className="chat-header">
             <div>
               <strong>AI Chat</strong>
-              <span>gpt-4o-mini</span>
+              <span>gemini-2.5-flash</span>
             </div>
             <button type="button" className="chat-close-btn" onClick={() => setOpen(false)}>
               Close

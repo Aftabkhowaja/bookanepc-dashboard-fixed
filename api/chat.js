@@ -1,4 +1,4 @@
-const MODEL = "gpt-4o-mini";
+const MODEL = "gemini-2.5-flash";
 
 function readJsonBody(req) {
   if (req.body == null) return {};
@@ -16,16 +16,37 @@ function sanitiseMessages(messages) {
     .slice(-20);
 }
 
+function toGeminiContents(messages) {
+  const contents = [];
+  for (const message of messages) {
+    const role = message.role === "assistant" ? "model" : "user";
+    const previous = contents[contents.length - 1];
+    if (previous && previous.role === role) {
+      previous.parts[0].text += `\n\n${message.content}`;
+      continue;
+    }
+    contents.push({ role, parts: [{ text: message.content }] });
+  }
+  while (contents.length && contents[0].role === "model") contents.shift();
+  return contents;
+}
+
+function redact(value, apiKey) {
+  const text = String(value || "");
+  if (!apiKey) return text;
+  return text.split(apiKey).join("[redacted]");
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed. Send a POST request to /api/chat." });
   }
 
-  const apiKey = String(process.env.OPENAI_API_KEY || "").trim();
+  const apiKey = String(process.env.GEMINI_API_KEY || "").trim();
   if (!apiKey) {
     return res.status(503).json({
-      error: "OPENAI_API_KEY is not set. Add OPENAI_API_KEY to the server environment (Vercel project settings) and redeploy.",
+      error: "GEMINI_API_KEY is not set. Add GEMINI_API_KEY to the server environment and redeploy.",
     });
   }
 
@@ -37,7 +58,8 @@ export default async function handler(req, res) {
   }
 
   const messages = sanitiseMessages(body.messages);
-  if (!messages.length || messages[messages.length - 1].role !== "user") {
+  const contents = toGeminiContents(messages);
+  if (!contents.length || contents[contents.length - 1].role !== "user") {
     return res.status(400).json({ error: "Send at least one user message." });
   }
 
@@ -50,30 +72,35 @@ export default async function handler(req, res) {
   ].join(" ");
 
   try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: system }] },
+          contents,
+          generationConfig: { temperature: 0.4, maxOutputTokens: 600 },
+        }),
       },
-      body: JSON.stringify({
-        model: MODEL,
-        temperature: 0.4,
-        max_tokens: 600,
-        messages: [{ role: "system", content: system }, ...messages],
-      }),
-    });
+    );
 
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      const message = data?.error?.message || `OpenAI request failed (${response.status}).`;
+      const message = redact(data?.error?.message || `Gemini request failed (${response.status}).`, apiKey);
       return res.status(response.status).json({ error: message });
     }
 
-    const reply = String(data?.choices?.[0]?.message?.content || "").trim();
-    if (!reply) return res.status(502).json({ error: "OpenAI returned an empty reply." });
+    const reply = (data?.candidates?.[0]?.content?.parts || [])
+      .map((part) => part?.text || "")
+      .join("")
+      .trim();
+    if (!reply) {
+      const reason = data?.promptFeedback?.blockReason || data?.candidates?.[0]?.finishReason || "empty reply";
+      return res.status(502).json({ error: `Gemini returned no text (${reason}).` });
+    }
     return res.status(200).json({ reply, model: MODEL });
   } catch (error) {
-    return res.status(502).json({ error: error.message || "Could not reach OpenAI." });
+    return res.status(502).json({ error: redact(error.message || "Could not reach Gemini.", apiKey) });
   }
 }
