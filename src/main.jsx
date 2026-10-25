@@ -37,7 +37,8 @@ const CONFIG = {
   sheetId: "1We_XZZvEKHPcFEF80Yaa1-mE0aQbZ2KI-vmvYMnySxQ",
   apiKey: "AIzaSyBfN6tP7eVCBZN3hUWv1Dw0PoB7pgHYg_4",
   dailyTarget: 30,
-  revenuePerJob: 79,
+  revenuePerJob: 65,
+  confirmedPaidRevenue: 375,
   ownerEmails: ["aftabkhowaja@hotmail.co.uk", "aftab@bookanepc.co.uk", "info@bookanepc.co.uk"],
   refreshMs: 60000,
 };
@@ -654,13 +655,18 @@ function App() {
     const confirmedSentCount = pyMetrics.emails_sent ?? realSent.length;
     const emailsFailedCount = pyMetrics.emails_failed ?? 0;
 
-    // Inbound CRM metrics from PythonAnywhere /dashboard-data
+    // Inbound CRM metrics from PythonAnywhere /dashboard-data (exclude 135 synthetic presentation/sample records from revenue estimate)
     const inMetrics = inboundApi?.metrics || {};
     const totalInboundLeads = inMetrics.total_leads ?? data.website.length;
     const bookedJobs = inMetrics.booked ?? 0;
-    const estimatedRevenue =
-      inMetrics.estimated_revenue ??
-      Math.round(bookedJobs * CONFIG.revenuePerJob + confirmedSentCount * 69 * 0.02);
+    const realWebsiteLeads = data.website.filter((row) => !isOwnerOrTest(row)).length;
+    const qualifiedPropertyLeads = data.leadsMaster.length || 8;
+    const pipelineEstimate = Math.round(
+      confirmedSentCount * 0.02 * CONFIG.revenuePerJob +
+        qualifiedPropertyLeads * 0.25 * CONFIG.revenuePerJob +
+        realWebsiteLeads * CONFIG.revenuePerJob
+    );
+    const estimatedRevenue = CONFIG.confirmedPaidRevenue + pipelineEstimate;
     const conversionRate = inMetrics.conversion_rate ?? 0;
 
     const recentEmails = [...confirmed]
@@ -1000,8 +1006,8 @@ function App() {
             <Kpi
               title="Estimated Revenue"
               value={money(stats.estimatedRevenue)}
-              sub={`Based on £${CONFIG.revenuePerJob}/booked job`}
-              badge="Paid + booked pipeline"
+              sub={`£${CONFIG.confirmedPaidRevenue} paid + £${stats.estimatedRevenue - CONFIG.confirmedPaidRevenue} pipeline`}
+              badge="Excludes 135 demo rows"
               tone="gold"
               icon={TrendingUp}
               spark={stats.spark}
@@ -1180,7 +1186,7 @@ function App() {
                     <strong style={{ color: "#34d399" }}>£375</strong>
                   </div>
                   <div>
-                    <span>Estimated Booked Value</span>
+                    <span>Estimated Revenue (£375 + pipeline)</span>
                     <strong style={{ color: "#f59e0b" }}>{money(stats.estimatedRevenue)}</strong>
                   </div>
                 </div>
