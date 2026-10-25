@@ -38,10 +38,26 @@ const CONFIG = {
 const TABS = {
   emailLog: "Email Log",
   queue: "Daily Send Queue",
+  masterPool: "Python Master Pool",
+  allContacts: "All Contacts",
+  campaignProspects: "Campaign Prospects",
+  cloudLog: "Cloud Campaign Log",
   website: "Website Leads",
   replies: "Replies",
   metrics: "Dashboard Metrics",
 };
+
+const TAB_LOADS = [
+  [TABS.queue, 1000],
+  [TABS.masterPool, 1000],
+  [TABS.allContacts, 1000],
+  [TABS.campaignProspects, 1000],
+  [TABS.emailLog, 1000],
+  [TABS.cloudLog, 1000],
+  [TABS.website, 1000],
+  [TABS.replies, 1000],
+  [TABS.metrics, 50],
+];
 
 const palette = ["#8b5cf6", "#34d399", "#f59e0b", "#a78bfa", "#10b981", "#c4b5fd"];
 const tooltipStyle = {
@@ -107,17 +123,71 @@ function isSent(row) {
   return /sent|delivered|success/i.test(field(row, ["status", "send_status", "email_status"]));
 }
 
+function isPoolSent(row) {
+  return field(row, ["campaignstatus"]).toUpperCase() === "SENT";
+}
+
+function isCloudSent(row) {
+  return /^(sent|delivered|success)$/i.test(field(row, ["status"]));
+}
+
+function isQueuedStatus(value) {
+  return /queue|ready|unsent|pending/i.test(String(value || ""));
+}
+
+function isMasterQueued(row) {
+  const campaign = field(row, ["campaignstatus"]).toUpperCase();
+  const reporting = field(row, ["reportingstatus"]).toUpperCase();
+  if (campaign === "SENT" || reporting === "SENT" || reporting === "SUPPRESSED") return false;
+  return isQueuedStatus(field(row, ["status"])) || field(row, ["status"]).toUpperCase() === "READY";
+}
+
+function isProspectQueued(row) {
+  return isQueuedStatus(field(row, ["status"]));
+}
+
+function isContactQueued(row) {
+  return !field(row, ["contacted"]);
+}
+
+function isDailyQueued(row) {
+  return isQueuedStatus(field(row, ["send_status", "status"]));
+}
+
 function emailOf(row) {
-  return field(row, ["email", "recipient", "recipient_email", "to"]);
+  return field(row, ["email", "recipient", "recipient_email", "to", "director_email"]);
+}
+
+function companyOf(row) {
+  return field(row, ["company_name", "companyname", "company", "business_name", "name"]);
+}
+
+function identity(value) {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
 function sentAt(row) {
-  return field(row, ["sent_at", "timestamp", "date", "created_at"]);
+  return field(row, ["sent_at", "sentat", "campaignsentat", "timestamp", "received_at", "date", "created_at", "queue_date", "snapshotat", "date_added"]);
+}
+
+function inRange(value, range, now = Date.now()) {
+  if (range === "all") return true;
+  const date = parseDate(value);
+  if (!date) return false;
+  return now - date.getTime() <= Number(range) * 86400000 && date.getTime() <= now + 3600000;
+}
+
+function dayLabel(date) {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    day: "2-digit",
+    month: "short",
+  }).format(date);
 }
 
 function isOwnerOrTest(row) {
   const email = emailOf(row).toLowerCase();
-  const company = field(row, ["company_name", "company", "name"]).toLowerCase();
+  const company = field(row, ["company_name", "companyname", "company", "name"]).toLowerCase();
   return CONFIG.ownerEmails.some((owner) => owner.toLowerCase() === email) || /test|owner|preview/.test(company);
 }
 
@@ -134,13 +204,25 @@ function safeNumber(value) {
   return new Intl.NumberFormat("en-GB").format(Math.round(Number(value) || 0));
 }
 
-async function fetchTab(tab) {
-  const range = encodeURIComponent(`${tab}!A:Z`);
+async function fetchTab(tab, rangeRows = 1000) {
+  const rows = tab === TABS.metrics ? 50 : rangeRows;
+  const range = encodeURIComponent(`${tab}!A1:Z${rows}`);
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.sheetId}/values/${range}?key=${CONFIG.apiKey}`;
   const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) throw new Error(`${tab}: Google Sheets API ${response.status}`);
   const data = await response.json();
   return rowsFromValues(data.values || []);
+}
+
+async function fetchPythonAnywhere() {
+  try {
+    const response = await fetch("/api/health", { cache: "no-store" });
+    if (!response.ok) return false;
+    const data = await response.json();
+    return Boolean(data.connected);
+  } catch {
+    return false;
+  }
 }
 
 function formatStamp(date) {
@@ -296,31 +378,54 @@ function ChatWidget({ context }) {
 }
 
 function App() {
-  const [data, setData] = useState({ emailLog: [], queue: [], website: [], replies: [], metrics: [] });
+  const [data, setData] = useState({
+    emailLog: [],
+    queue: [],
+    masterPool: [],
+    allContacts: [],
+    campaignProspects: [],
+    cloudLog: [],
+    website: [],
+    replies: [],
+    metrics: [],
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [lastSync, setLastSync] = useState(null);
   const [clock, setClock] = useState(new Date());
   const [menuOpen, setMenuOpen] = useState(false);
+  const [range, setRange] = useState("7");
+  const [sheetsConnected, setSheetsConnected] = useState(null);
+  const [pythonAnywhere, setPythonAnywhere] = useState(null);
 
   async function refresh() {
     setLoading(true);
     setError("");
-    try {
-      const [emailLog, queue, website, replies, metrics] = await Promise.all([
-        fetchTab(TABS.emailLog),
-        fetchTab(TABS.queue),
-        fetchTab(TABS.website),
-        fetchTab(TABS.replies),
-        fetchTab(TABS.metrics),
-      ]);
-      setData({ emailLog, queue, website, replies, metrics });
-      setLastSync(new Date());
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+    fetchPythonAnywhere().then(setPythonAnywhere);
+    const settled = await Promise.allSettled(TAB_LOADS.map(([tab, rows]) => fetchTab(tab, rows)));
+    const next = {
+      emailLog: [],
+      queue: [],
+      masterPool: [],
+      allContacts: [],
+      campaignProspects: [],
+      cloudLog: [],
+      website: [],
+      replies: [],
+      metrics: [],
+    };
+    const keys = ["queue", "masterPool", "allContacts", "campaignProspects", "emailLog", "cloudLog", "website", "replies", "metrics"];
+    const errors = [];
+    settled.forEach((result, index) => {
+      const key = keys[index];
+      if (result.status === "fulfilled") next[key] = result.value;
+      else errors.push(result.reason?.message || `${TAB_LOADS[index][0]} failed`);
+    });
+    setData(next);
+    setSheetsConnected(settled.some((result) => result.status === "fulfilled"));
+    setLastSync(new Date());
+    setError(errors.length && errors.length === settled.length ? errors.join(" · ") : errors.length ? `Some tabs did not load: ${errors.join(" · ")}` : "");
+    setLoading(false);
   }
 
   useEffect(() => {
@@ -335,36 +440,100 @@ function App() {
 
   const stats = useMemo(() => {
     const today = londonKey();
-    const sentRows = data.emailLog.filter(isSent);
-    const realSent = sentRows.filter((row) => !isOwnerOrTest(row));
-    const testSent = sentRows.filter(isOwnerOrTest);
-    const realToday = realSent.filter((row) => dateKey(sentAt(row)) === today);
-    const testToday = testSent.filter((row) => dateKey(sentAt(row)) === today);
-    const websiteToday = data.website.filter((row) => dateKey(field(row, ["received_at", "submitted_at", "created_at", "timestamp", "date"])) === today);
-    const readyQueue = data.queue.filter(isUnsentQueue);
-    const realWeek = realSent.filter((row) => {
-      const date = parseDate(sentAt(row));
-      return date && Date.now() - date.getTime() <= 7 * 86400000;
+    const now = Date.now();
+    const pool = data.masterPool.concat(data.allContacts, data.campaignProspects, data.queue);
+    const companies = new Set();
+    const emails = new Set();
+    pool.forEach((row) => {
+      const company = identity(companyOf(row));
+      const email = identity(emailOf(row));
+      if (company) companies.add(company);
+      if (email) emails.add(email);
     });
-    const boroughCounts = data.queue.reduce((acc, row) => {
-      const borough = field(row, ["borough", "area"]) || "Unknown";
-      acc[borough] = (acc[borough] || 0) + 1;
+    const queuedCount = data.queue.filter(isDailyQueued).length
+      + data.masterPool.filter(isMasterQueued).length
+      + data.campaignProspects.filter(isProspectQueued).length
+      + data.allContacts.filter(isContactQueued).length;
+
+    const confirmed = [
+      ...data.emailLog.filter(isSent).map((row) => ({ row, source: "email" })),
+      ...data.masterPool.filter(isPoolSent).map((row) => ({ row, source: "pool" })),
+      ...data.cloudLog.filter(isCloudSent).map((row) => ({ row, source: "cloud" })),
+    ];
+    const realSent = confirmed.filter((entry) => !isOwnerOrTest(entry.row));
+    const testSent = confirmed.filter((entry) => isOwnerOrTest(entry.row));
+    const inWindow = (entry) => inRange(sentAt(entry.row), range, now);
+    const realWindow = realSent.filter(inWindow);
+    const testWindow = testSent.filter(inWindow);
+    const realShown = realWindow.length ? realWindow : realSent;
+    const testShown = testWindow.length ? testWindow : testSent;
+    const windowLabel = range === "all" ? "all time" : `last ${range} days`;
+    const realToday = realSent.filter((entry) => dateKey(sentAt(entry.row)) === today);
+    const testToday = testSent.filter((entry) => dateKey(sentAt(entry.row)) === today);
+    const websiteToday = data.website.filter((row) => dateKey(field(row, ["received_at", "submitted_at", "created_at", "timestamp", "date"])) === today);
+    const readyPool = data.masterPool.filter(isMasterQueued);
+    const readyQueueRows = [];
+    const seen = new Set();
+    [...readyPool, ...data.queue].forEach((row) => {
+      const key = identity(emailOf(row)) || identity(companyOf(row));
+      if (key && seen.has(key)) return;
+      if (key) seen.add(key);
+      readyQueueRows.push(row);
+    });
+    const areaCounts = [...data.queue, ...readyPool].reduce((acc, row) => {
+      const area = field(row, ["borough", "area"]) || "Unknown";
+      acc[area] = (acc[area] || 0) + 1;
       return acc;
     }, {});
-    const boroughData = Object.entries(boroughCounts).map(([name, value]) => ({ name, value }));
-    const progress = Math.min(100, Math.round((realToday.length / CONFIG.dailyTarget) * 100));
-    const likelyRevenue = realSent.length * 69 * 0.02 + data.website.length * 69 * 0.25;
-    return { sentRows, realSent, testSent, realToday, testToday, websiteToday, readyQueue, realWeek, boroughData, progress, likelyRevenue };
-  }, [data]);
+    const areaEntries = Object.entries(areaCounts).sort((a, b) => b[1] - a[1]);
+    const topAreas = areaEntries.slice(0, 6).map(([name, value]) => ({ name, value }));
+    const other = areaEntries.slice(6).reduce((sum, [, value]) => sum + value, 0);
+    if (other) topAreas.push({ name: "Other", value: other });
+    const displayedReal = realToday.length ? realToday : realShown;
+    const displayedTest = testToday.length ? testToday : testShown;
+    const progress = Math.min(100, Math.round((displayedReal.length / CONFIG.dailyTarget) * 100));
+    const likelyRevenue = displayedReal.length * 69 * 0.02 + data.website.length * 69 * 0.25;
+    const buckets = new Map();
+    const bump = (value, keyName) => {
+      const date = parseDate(value);
+      if (!date) return;
+      const key = londonKey(date);
+      const bucket = buckets.get(key) || { key, day: dayLabel(date), sent: 0, queue: 0 };
+      bucket[keyName] += 1;
+      buckets.set(key, bucket);
+    };
+    realShown.forEach((entry) => bump(sentAt(entry.row), "sent"));
+    readyQueueRows.forEach((row) => bump(sentAt(row), "queue"));
+    let chartDays = [...buckets.values()].sort((a, b) => a.key.localeCompare(b.key));
+    if (chartDays.length > 7) chartDays = chartDays.slice(-7);
+    if (!chartDays.length) chartDays = [{ key: "empty", day: "Recent", sent: 0, queue: readyQueueRows.length }];
+    return {
+      queueRows: pool.length,
+      uniqueCompanies: companies.size,
+      uniqueContacts: emails.size,
+      queuedCount,
+      realSent,
+      testSent,
+      realToday,
+      testToday,
+      realShown,
+      displayedReal,
+      displayedTest,
+      usingRealFallback: realToday.length === 0 && displayedReal.length > 0,
+      usingTestFallback: testToday.length === 0 && displayedTest.length > 0,
+      windowLabel,
+      websiteToday,
+      readyQueueRows,
+      boroughData: topAreas,
+      progress,
+      likelyRevenue,
+      chartDays,
+    };
+  }, [data, range]);
 
-  const chartDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day, index) => ({
-    day,
-    sent: index === 6 ? stats.realToday.length : Math.max(0, stats.realWeek.length - index),
-    queue: Math.max(3, Math.round(stats.readyQueue.length / 4) + (index % 3)),
-  }));
-
-  const recentEmails = [...stats.sentRows].slice(-10).reverse();
-  const topQueue = stats.readyQueue.slice(0, 10);
+  const recentEmails = [...stats.displayedReal, ...stats.displayedTest]
+    .sort((a, b) => String(sentAt(b.row)).localeCompare(String(sentAt(a.row))))
+    .slice(0, 12);
   const latestWebsite = [...data.website].slice(-5).reverse();
 
   return (
@@ -404,11 +573,11 @@ function App() {
         <div className="status-grid">
           <article className="status-card">
             <span>Inbound API</span>
-            <strong><i className="status-dot" /> Connected</strong>
+            <strong><i className={`status-dot ${sheetsConnected == null ? "wait" : sheetsConnected ? "on" : "off"}`} /> {sheetsConnected == null ? "Checking" : sheetsConnected ? "Connected" : "Disconnected"}</strong>
           </article>
           <article className="status-card">
             <span>PythonAnywhere</span>
-            <strong><i className="status-dot" /> Connected</strong>
+            <strong><i className={`status-dot ${pythonAnywhere == null ? "wait" : pythonAnywhere ? "on" : "off"}`} /> {pythonAnywhere == null ? "Checking" : pythonAnywhere ? "Connected" : "Disconnected"}</strong>
           </article>
           <article className="status-card">
             <span>Last refresh</span>
@@ -425,8 +594,11 @@ function App() {
           <div className="outreach-tools">
             <label className="range-select">
               Range:
-              <select defaultValue="7" aria-label="Range">
+              <select value={range} aria-label="Range" onChange={(event) => setRange(event.target.value)}>
                 <option value="7">7 days</option>
+                <option value="14">14 days</option>
+                <option value="30">30 days</option>
+                <option value="all">All time</option>
               </select>
             </label>
             <div className="connected-box"><i className="status-dot" /> Connected</div>
@@ -440,34 +612,56 @@ function App() {
             <p>Verified outbound queue, contact, reply and source metrics are loading from the protected endpoint.</p>
           </div>
         </article>
+        <div className="outreach-kpis">
+          <article className="outreach-kpi">
+            <span>Queue rows</span>
+            <strong>{safeNumber(stats.queueRows)}</strong>
+            <small>Daily Send Queue</small>
+          </article>
+          <article className="outreach-kpi">
+            <span>Unique companies</span>
+            <strong>{safeNumber(stats.uniqueCompanies)}</strong>
+            <small>Queue records in selected range</small>
+          </article>
+          <article className="outreach-kpi">
+            <span>Unique contacts</span>
+            <strong>{safeNumber(stats.uniqueContacts)}</strong>
+            <small>Normalised queue email</small>
+          </article>
+          <article className="outreach-kpi">
+            <span>Emails queued</span>
+            <strong>{safeNumber(stats.queuedCount)}</strong>
+            <small>Queue status: queued</small>
+          </article>
+        </div>
       </section>
 
       {error ? <div className="alert">{error}</div> : null}
 
       <main>
         <div className="kpi-grid">
-          <Kpi title="Real Client Emails (24h)" value={stats.realToday.length} sub={`${stats.progress}% of 30/day target`} icon={Send} spark={[0, 0, 0, stats.realToday.length, 1, 0, stats.realToday.length]} />
-          <Kpi title="Owner/Test Sends (24h)" value={stats.testToday.length} sub="Separated from revenue outreach" tone="gold" icon={Mail} spark={[1, 2, 2, 3, 2, 3, stats.testToday.length]} />
-          <Kpi title="Queue Ready" value={stats.readyQueue.length} sub="Prepared client leads" icon={Target} spark={[12, 14, 16, 18, 20, stats.readyQueue.length]} />
-          <Kpi title="Website Leads Today" value={stats.websiteToday.length} sub={`${data.website.length} captured total`} icon={Phone} spark={[0, 1, 0, 1, 2, stats.websiteToday.length]} />
-          <Kpi title="Replies Captured" value={data.replies.length} sub="From replies tab" icon={Activity} spark={[0, 0, 0, 1, data.replies.length]} />
-          <Kpi title="Likely Revenue Signal" value={money(stats.likelyRevenue)} sub="Weighted early pipeline" tone="gold" icon={TrendingUp} spark={[0, 69, 138, 180, stats.likelyRevenue]} />
+          <Kpi title="Real Client Emails (24h)" value={stats.displayedReal.length} sub={stats.usingRealFallback ? `No sends in the last 24h — showing ${stats.windowLabel}` : `${stats.progress}% of 30/day target`} icon={Send} spark={stats.chartDays.map((day) => day.sent)} />
+          <Kpi title="Owner/Test Sends (24h)" value={stats.displayedTest.length} sub={stats.usingTestFallback ? `No test sends in the last 24h — showing ${stats.windowLabel}` : "Separated from revenue outreach"} tone="gold" icon={Mail} spark={stats.chartDays.map((day) => day.sent)} />
+          <Kpi title="Queue Ready" value={stats.readyQueueRows.length} sub="Prepared client leads" icon={Target} spark={[stats.readyQueueRows.length]} />
+          <Kpi title="Website Leads Today" value={stats.websiteToday.length || data.website.length} sub={stats.websiteToday.length ? `${data.website.length} captured total` : `${data.website.length} captured — none in the last 24h`} icon={Phone} spark={[data.website.length]} />
+          <Kpi title="Replies Captured" value={data.replies.length} sub="From replies tab" icon={Activity} spark={[data.replies.length]} />
+          <Kpi title="Likely Revenue Signal" value={money(stats.likelyRevenue)} sub="Weighted early pipeline" tone="gold" icon={TrendingUp} spark={stats.chartDays.map((day) => day.sent)} />
         </div>
 
         <Panel title="Truth Check" meta="Real logs only" className="span-4">
           <div className="stat-list">
             <div><span>Total real client sends</span><strong>{stats.realSent.length}</strong></div>
             <div><span>Total owner/test sends</span><strong>{stats.testSent.length}</strong></div>
-            <div><span>Real sends last 7 days</span><strong>{stats.realWeek.length}</strong></div>
+            <div><span>Real sends in view</span><strong>{stats.displayedReal.length}</strong></div>
             <div><span>Website enquiries total</span><strong>{data.website.length}</strong></div>
           </div>
           <div className="meter"><div style={{ width: `${stats.progress}%` }} /></div>
-          <p className="muted">{stats.realToday.length} of {CONFIG.dailyTarget} real client emails sent today.</p>
+          <p className="muted">{stats.usingRealFallback ? `${stats.displayedReal.length} confirmed real sends in view. None are timestamped today.` : `${stats.realToday.length} of ${CONFIG.dailyTarget} real client emails sent today.`}</p>
         </Panel>
 
         <Panel title="Lead Activity" meta="Queue vs confirmed sends" className="span-8">
           <ResponsiveContainer width="100%" height={230}>
-            <BarChart data={chartDays}>
+            <BarChart data={stats.chartDays}>
               <CartesianGrid stroke="rgba(167,139,250,.14)" vertical={false} />
               <XAxis dataKey="day" stroke="#a78bfa" />
               <YAxis stroke="#a78bfa" />
@@ -497,13 +691,13 @@ function App() {
             <table>
               <thead><tr><th>Rank</th><th>Company</th><th>Email</th><th>Borough</th><th>Hook</th></tr></thead>
               <tbody>
-                {topQueue.map((row, index) => (
+                {stats.readyQueueRows.map((row, index) => (
                   <tr key={`${emailOf(row)}-${index}`}>
                     <td>{field(row, ["revenue_batch_rank", "rank"]) || index + 1}</td>
-                    <td><strong>{field(row, ["company_name", "name", "business_name"]) || "Unknown"}</strong></td>
+                    <td><strong>{companyOf(row) || "Unknown"}</strong></td>
                     <td>{emailOf(row)}</td>
                     <td>{field(row, ["borough", "area"]) || "-"}</td>
-                    <td>{field(row, ["sales_hook", "recommended_action"]) || "-"}</td>
+                    <td>{field(row, ["sales_hook", "recommended_action", "status", "tier"]) || "-"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -516,13 +710,13 @@ function App() {
             <table>
               <thead><tr><th>Time</th><th>Type</th><th>Status</th><th>Email</th><th>Company</th></tr></thead>
               <tbody>
-                {recentEmails.map((row, index) => (
-                  <tr key={`${sentAt(row)}-${index}`}>
-                    <td>{sentAt(row) || "-"}</td>
-                    <td><span className={`badge ${isOwnerOrTest(row) ? "test" : "live"}`}>{isOwnerOrTest(row) ? "owner/test" : "real client"}</span></td>
-                    <td>{field(row, ["status", "send_status"]) || "-"}</td>
-                    <td>{emailOf(row) || "-"}</td>
-                    <td><strong>{field(row, ["company_name", "company", "name"]) || "-"}</strong></td>
+                {recentEmails.map((entry, index) => (
+                  <tr key={`${sentAt(entry.row)}-${entry.source}-${index}`}>
+                    <td>{sentAt(entry.row) || "-"}</td>
+                    <td><span className={`badge ${isOwnerOrTest(entry.row) ? "test" : "live"}`}>{isOwnerOrTest(entry.row) ? "owner/test" : entry.source === "pool" ? "campaign sent" : entry.source === "cloud" ? "cloud sent" : "real client"}</span></td>
+                    <td>{field(entry.row, ["status", "send_status", "campaignstatus"]) || "-"}</td>
+                    <td>{emailOf(entry.row) || "-"}</td>
+                    <td><strong>{companyOf(entry.row) || "-"}</strong></td>
                   </tr>
                 ))}
               </tbody>
@@ -547,11 +741,11 @@ function App() {
           <div className="action-strip">
             <CheckCircle2 />
             <div>
-              <strong>{stats.realToday.length === 0 ? "Send the first 10 real client emails, then pause" : "Continue controlled outreach"}</strong>
+              <strong>{stats.readyQueueRows.length ? `${stats.readyQueueRows.length} ready prospects are waiting` : "Continue controlled outreach"}</strong>
               <span>
-                {stats.realToday.length === 0
-                  ? "The queue is ready, but the confirmed log shows zero real client emails today. Start with 10, then watch replies before scaling to 30/day."
-                  : `${stats.realToday.length} real client sends are confirmed today. Keep reporting from Email Log only.`}
+                {stats.usingRealFallback
+                  ? `${stats.displayedReal.length} confirmed real sends are in view from Email Log and Python Master Pool. None are timestamped in the last 24 hours.`
+                  : `${stats.realToday.length} real client sends are confirmed today.`}
               </span>
             </div>
           </div>
@@ -559,12 +753,11 @@ function App() {
       </main>
       <ChatWidget
         context={[
-          `Real client emails today: ${stats.realToday.length} of ${CONFIG.dailyTarget}.`,
-          `Owner/test sends today: ${stats.testToday.length}.`,
-          `Queue ready: ${stats.readyQueue.length}.`,
-          `Website leads today: ${stats.websiteToday.length} (${data.website.length} total).`,
-          `Replies captured: ${data.replies.length}.`,
-          `Total real client sends: ${stats.realSent.length}.`,
+          `Queue rows: ${stats.queueRows}. Unique companies: ${stats.uniqueCompanies}. Unique contacts: ${stats.uniqueContacts}. Emails queued: ${stats.queuedCount}.`,
+          `Real client sends in view: ${stats.displayedReal.length} of ${CONFIG.dailyTarget} daily target.`,
+          `Owner/test sends in view: ${stats.displayedTest.length}.`,
+          `Queue ready: ${stats.readyQueueRows.length}.`,
+          `Website leads: ${data.website.length}. Replies: ${data.replies.length}.`,
           `Likely revenue signal: ${money(stats.likelyRevenue)}.`,
         ].join(" ")}
       />

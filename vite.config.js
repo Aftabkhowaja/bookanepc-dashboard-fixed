@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import handler from "./api/chat.js";
+import health from "./api/health.js";
 
 function readRawBody(req) {
   return new Promise((resolve, reject) => {
@@ -36,6 +37,9 @@ function vercelResponse(res) {
 
 function localChatApi() {
   const attach = (middlewares) => {
+    middlewares.use("/api/health", async (req, res) => {
+      await health(req, vercelResponse(res));
+    });
     middlewares.use("/api/chat", async (req, res) => {
       try {
         req.body = await readRawBody(req);
