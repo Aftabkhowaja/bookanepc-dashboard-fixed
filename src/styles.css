@@ -367,6 +367,22 @@ h2 {
   line-height: 1.5;
 }
 
+.outreach-kpis {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.status-card strong.is-offline {
+  color: #f87171;
+}
+
+.dot-off {
+  background: #f87171;
+  box-shadow: 0 0 12px #f87171;
+}
+
 .alert {
   margin: 14px 22px 0;
   border: 1px solid rgba(248, 113, 113, 0.45);
@@ -592,6 +608,7 @@ button {
 
 @media (max-width: 1180px) {
   .kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .outreach-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .span-4, .span-5, .span-7, .span-8 { grid-column: span 12; }
 }
 
@@ -599,7 +616,8 @@ button {
   .brand-bar { align-items: flex-start; }
   h1 { font-size: 32px; }
   .status-grid,
-  .kpi-grid { grid-template-columns: 1fr; }
+  .kpi-grid,
+  .outreach-kpis { grid-template-columns: 1fr; }
   .outreach-head { align-items: flex-start; flex-direction: column; }
   main { padding: 14px 12px 28px; }
   .hero, .outreach-block, .alert { margin-left: 0; }
