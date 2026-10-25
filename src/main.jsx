@@ -194,6 +194,34 @@ function safeNumber(value) {
   return new Intl.NumberFormat("en-GB").format(Math.round(Number(value) || 0));
 }
 
+const PAGES = [
+  ["overview", "Overview", "Business Overview", "Live BookAnEPC enquiries, bookings and operational performance"],
+  ["inbound", "Inbound Leads", "Inbound Leads", "Website enquiries captured from the landing page"],
+  ["outbound", "Outbound Outreach", "Outbound Outreach", "Safe outbound connection readiness and intended performance metrics"],
+  ["pipeline", "Lead Pipeline", "Lead Pipeline", "Ready prospects from the master pool and daily queue"],
+  ["appointments", "Appointments", "Appointments", "Booking status recorded on inbound enquiries"],
+  ["revenue", "Revenue", "Revenue", "Estimated value from booked jobs"],
+  ["services", "Services", "Services", "Demand by requested EPC service"],
+  ["areas", "Areas", "Areas", "Borough and area mix from the ready queue"],
+  ["communications", "Communications", "Communications", "Confirmed sends and failures from the email logs"],
+  ["automation", "Automation", "Automation", "Refresh cadence and connection controls"],
+  ["system", "System Status", "System Status", "Inbound sheet API, CRM, and PythonAnywhere health"],
+];
+
+function trendLabel(isoDate) {
+  const date = parseDate(isoDate);
+  if (!date) return isoDate || "";
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", weekday: "short", day: "numeric" }).formatToParts(date);
+  const map = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+  return `${map.weekday} ${map.day}`;
+}
+
+function statusLabel(ok) {
+  if (ok === false) return "Offline";
+  if (ok) return "Connected";
+  return "Checking";
+}
+
 function formatRefresh(date) {
   if (!date) return "Waiting";
   const parts = new Intl.DateTimeFormat("en-GB", {
@@ -238,6 +266,17 @@ async function fetchTab(tab, rangeRows = 1000) {
   if (!response.ok) throw new Error(`${tab}: Google Sheets API ${response.status}`);
   const data = await response.json();
   return rowsFromValues(data.values || []);
+}
+
+async function fetchCrm() {
+  try {
+    const response = await fetch("/api/dashboard-data", { cache: "no-store" });
+    if (!response.ok) return { ok: false, data: null };
+    const data = await response.json();
+    return { ok: data?.status === "ok", data };
+  } catch {
+    return { ok: false, data: null };
+  }
 }
 
 async function checkPythonAnywhere() {
@@ -396,10 +435,14 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [lastSync, setLastSync] = useState(null);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [page, setPage] = useState("overview");
+  const [navOpen, setNavOpen] = useState(false);
+  const [paused, setPaused] = useState(false);
   const [range, setRange] = useState("7");
   const [sheetsOk, setSheetsOk] = useState(null);
   const [pythonOk, setPythonOk] = useState(null);
+  const [crm, setCrm] = useState(null);
+  const [crmOk, setCrmOk] = useState(null);
 
   async function refresh() {
     setLoading(true);
@@ -416,9 +459,10 @@ function App() {
       ["metrics", TABS.metrics, 50],
     ];
     try {
-      const [settled, python] = await Promise.all([
+      const [settled, python, crmResult] = await Promise.all([
         Promise.allSettled(specs.map(([, tab, limit]) => fetchTab(tab, limit))),
         checkPythonAnywhere(),
+        fetchCrm(),
       ]);
       const next = { ...EMPTY_DATA };
       const failures = [];
@@ -430,6 +474,8 @@ function App() {
       setData(next);
       setSheetsOk(settled.some((result) => result.status === "fulfilled"));
       setPythonOk(python);
+      setCrm(crmResult.data);
+      setCrmOk(crmResult.ok);
       setLastSync(new Date());
       setError(failures.length ? `Some tabs did not load: ${failures.join("; ")}` : "");
     } catch (err) {
@@ -442,9 +488,13 @@ function App() {
 
   useEffect(() => {
     refresh();
+  }, []);
+
+  useEffect(() => {
+    if (paused) return undefined;
     const refreshId = setInterval(refresh, CONFIG.refreshMs);
     return () => clearInterval(refreshId);
-  }, []);
+  }, [paused]);
 
   const stats = useMemo(() => {
     const today = londonKey();
@@ -530,33 +580,143 @@ function App() {
   }, [data, range]);
 
   const latestWebsite = [...data.website].slice(-5).reverse();
+  const pageMeta = PAGES.find(([id]) => id === page) || PAGES[0];
+  const metrics = crm?.metrics || {};
+  const services = Object.entries(crm?.service_counts || {})
+    .map(([name, value]) => ({ name, value: Number(value) || 0 }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 5);
+  const statuses = Object.entries(crm?.status_counts || {})
+    .map(([name, value]) => ({ name, value: Number(value) || 0 }))
+    .filter((row) => row.value > 0)
+    .sort((a, b) => b.value - a.value);
+  const trend = (crm?.daily_counts || []).map((row) => ({ day: trendLabel(row.date), leads: Number(row.count) || 0 }));
+  const trendMax = trend.reduce((max, row) => Math.max(max, row.leads), 0);
+  const recentCrm = (crm?.recent_leads || []).slice(0, 8);
+  const statusTotal = statuses.reduce((sum, row) => sum + row.value, 0) || Number(metrics.total_leads) || 1;
+  const openPage = (id) => {
+    setPage(id);
+    setNavOpen(false);
+  };
 
   return (
-    <div className="app">
-      <header className="brand-bar">
-        <div className="brand">
-          <EnergyBadge />
+    <div className="app ops">
+      <aside className={navOpen ? "ops-side open" : "ops-side"}>
+        <div className="ops-brand">
+          <img src="/bookanepc-logo.png" alt="BookAn EPC" />
+          <span>LONDON PROPERTY SERVICES</span>
+        </div>
+        <nav className="ops-nav">
+          {PAGES.map(([id, label]) => (
+            <button key={id} type="button" className={page === id ? "active" : ""} onClick={() => openPage(id)}>{label}</button>
+          ))}
+        </nav>
+        <div className="ops-foot"><span className="ops-avatar">BA</span><span><b>BookAnEPC Team</b><small>Administrator</small></span></div>
+      </aside>
+      <div className="ops-content">
+        <div className="ops-top">
           <div>
-            <strong>BookAn EPC</strong>
-            <span>FAST | RELIABLE | CERTIFIED</span>
+            <p className="ops-eyebrow">BookAnEPC Operations</p>
+            <h1>{pageMeta[2]}</h1>
+            <span>{pageMeta[3]}</span>
+          </div>
+          <button type="button" className="ops-menu" onClick={() => setNavOpen((open) => !open)}>Menu</button>
+          <div className="ops-actions">
+            <span className="ops-pill"><em>Inbound API</em><b className={sheetsOk === false ? "off" : ""}>{statusLabel(sheetsOk)}</b></span>
+            <span className="ops-pill"><em>PythonAnywhere</em><b className={pythonOk === false ? "off" : ""}>{statusLabel(pythonOk)}</b></span>
+            <span className="ops-pill"><em>CRM</em><b className={crmOk === false ? "off" : ""}>{statusLabel(crmOk)}</b></span>
+            <span className="ops-pill ops-refresh-meta"><em>Last refresh</em><b className="time">{formatRefresh(lastSync)}</b></span>
+            <button type="button" className="ops-pause" aria-pressed={paused} onClick={() => setPaused((value) => !value)}>{paused ? "Resume" : "Pause"}</button>
+            <button type="button" className="ops-refresh" onClick={refresh}>↻ Refresh</button>
           </div>
         </div>
-        <div className="menu-wrap">
-          <button type="button" className="menu-pill" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}>
-            Menu
-          </button>
-          {menuOpen ? (
-            <nav className="menu-panel">
-              <a className="active" onClick={() => setMenuOpen(false)}>Overview</a>
-              <a onClick={() => setMenuOpen(false)}>Leads</a>
-              <a onClick={() => setMenuOpen(false)}>Analytics</a>
-              <a onClick={() => setMenuOpen(false)}>Areas</a>
-              <a onClick={() => setMenuOpen(false)}>Automation</a>
-            </nav>
-          ) : null}
-        </div>
-      </header>
-
+        {error ? <div className="alert">{error}</div> : null}
+        {page === "overview" ? (
+          <section className="ops-overview">
+            <div className="ops-kpis">
+              <article className="ops-kpi violet"><i>●</i><div><span>Total Enquiries</span><strong>{crm ? safeNumber(metrics.total_leads || 0) : "—"}</strong><small>All verified inbound leads</small><em>Live CRM total</em></div></article>
+              <article className="ops-kpi blue"><i>#</i><div><span>New This Week</span><strong>{crm ? safeNumber(metrics.week_leads || 0) : "—"}</strong><small>Enquiries this week</small><em>Current week total</em></div></article>
+              <article className="ops-kpi green"><i>✓</i><div><span>Booked Jobs</span><strong>{crm ? safeNumber(metrics.booked || 0) : "—"}</strong><small>Confirmed and booked</small><em>Verified status count</em></div></article>
+              <article className="ops-kpi gold"><i>£</i><div><span>Estimated Revenue</span><strong>{crm ? money(metrics.estimated_revenue || 0) : "—"}</strong><small>Based on booked jobs</small><em>Estimated only</em></div></article>
+              <article className="ops-kpi violet"><i>✉</i><div><span>Emails Sent</span><strong>{crm ? safeNumber(crm.email_activity?.sent || metrics.emails_sent || 0) : "—"}</strong><small>Returned by live API</small><em>Verified activity</em></div></article>
+              <article className="ops-kpi coral"><i>!</i><div><span>Email Failures</span><strong>{crm ? safeNumber(crm.email_activity?.failed || 0) : "—"}</strong><small>Returned by live API</small><em>Needs attention</em></div></article>
+            </div>
+            <p className="ops-warning">CRM contains demonstration records; totals and estimated revenue may be inflated.</p>
+            <div className="ops-charts">
+              <article className="ops-card ops-trend">
+                <div className="ops-card-head"><h2>Seven-Day Lead Trend</h2><span>Last 7 days</span></div>
+                <ResponsiveContainer width="100%" height={210}>
+                  <AreaChart data={trend.length ? trend : [{ day: "—", leads: 0 }]}>
+                    <CartesianGrid stroke="rgba(167,139,250,.16)" vertical={false} />
+                    <XAxis dataKey="day" stroke="#a78bfa" tick={{ fontSize: 11 }} />
+                    <YAxis stroke="#a78bfa" width={28} allowDecimals={false} domain={[0, trendMax || 1]} />
+                    <Tooltip contentStyle={{ background: "#171027", border: "1px solid #49356c", color: "#f7f3ff", borderRadius: 12 }} />
+                    <Area type="monotone" dataKey="leads" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.18} strokeWidth={2} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </article>
+              <article className="ops-card">
+                <div className="ops-card-head"><h2>Lead Status Distribution</h2><span>Current records</span></div>
+                <div className="ops-donut">
+                  <ResponsiveContainer width="100%" height={180}>
+                    <PieChart>
+                      <Pie data={statuses.length ? statuses : [{ name: "Waiting", value: 1 }]} dataKey="value" nameKey="name" innerRadius={48} outerRadius={72} paddingAngle={2}>
+                        {(statuses.length ? statuses : [{ name: "Waiting", value: 1 }]).map((row, index) => <Cell key={row.name} fill={index === 0 ? "#8b5cf6" : "#c4b5fd"} />)}
+                      </Pie>
+                      <Tooltip contentStyle={{ background: "#171027", border: "1px solid #49356c", color: "#f7f3ff", borderRadius: 12 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="ops-legend">
+                    {statuses.map((row, index) => (
+                      <div key={row.name}><i style={{ background: index === 0 ? "#8b5cf6" : "#c4b5fd" }} /><span>{row.name}</span><b>{safeNumber(row.value)} ({Math.round((row.value / statusTotal) * 100)}%)</b></div>
+                    ))}
+                  </div>
+                </div>
+              </article>
+              <article className="ops-card">
+                <div className="ops-card-head"><h2>Service Demand</h2><span>Real API data</span></div>
+                <div className="ops-donut">
+                  <ResponsiveContainer width="100%" height={180}>
+                    <PieChart>
+                      <Pie data={services.length ? services : [{ name: "Waiting", value: 1 }]} dataKey="value" nameKey="name" innerRadius={48} outerRadius={72} paddingAngle={2}>
+                        {(services.length ? services : [{ name: "Waiting", value: 1 }]).map((row, index) => <Cell key={row.name} fill={palette[index % palette.length]} />)}
+                      </Pie>
+                      <Tooltip contentStyle={{ background: "#171027", border: "1px solid #49356c", color: "#f7f3ff", borderRadius: 12 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="ops-legend">
+                    {services.map((row, index) => (
+                      <div key={row.name}><i style={{ background: palette[index % palette.length] }} /><span>{row.name}</span><b>{safeNumber(row.value)} ({Math.round((row.value / (Number(metrics.total_leads) || row.value || 1)) * 100)}%)</b></div>
+                    ))}
+                  </div>
+                </div>
+              </article>
+            </div>
+            <article className="ops-card ops-leads">
+              <div className="ops-card-head"><h2>Recent Leads</h2><span>{recentCrm.length} returned</span></div>
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>Date</th><th>Name</th><th>Contact</th><th>Area</th><th>Service</th><th>Source</th><th>Status</th></tr></thead>
+                  <tbody>
+                    {recentCrm.map((row, index) => (
+                      <tr key={`${row.created_at}-${index}`}>
+                        <td>{trendLabel(row.created_at) || "—"}</td>
+                        <td><strong>{row.name || "—"}</strong></td>
+                        <td>{row.phone_masked || row.email_masked || "—"}</td>
+                        <td>{row.postcode || "—"}</td>
+                        <td>{row.service_type || "—"}</td>
+                        <td>{row.source || "—"}</td>
+                        <td><span className="badge">{row.status || "—"}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </article>
+          </section>
+        ) : null}
+        {page === "outbound" ? (
+          <>
       <section className="hero">
         <p className="eyebrow">BookAn EPC Outbound Outreach</p>
         <h1>Outbound Outreach</h1>
@@ -733,6 +893,97 @@ function App() {
           </div>
         </Panel>
       </main>
+          </>
+        ) : null}
+        {page === "inbound" ? (
+          <main>
+            <Panel title="Website Leads" meta="Landing page capture" className="span-7">
+              <div className="lead-cards">
+                {latestWebsite.length ? latestWebsite.map((row, index) => (
+                  <div className="lead-card" key={index}>
+                    <strong>{field(row, ["name", "customer_name"]) || "Website enquiry"}</strong>
+                    <span>{field(row, ["service", "job_type", "service_needed"]) || "Service not set"}</span>
+                    <span>{[field(row, ["phone", "telephone"]), emailOf(row)].filter(Boolean).join(" | ")}</span>
+                    <span>{field(row, ["address", "property_address"])}</span>
+                  </div>
+                )) : <div className="lead-card"><strong>No website leads yet</strong><span>New landing page enquiries will appear here.</span></div>}
+              </div>
+            </Panel>
+            <Panel title="Replies" meta="Captured replies" className="span-5">
+              <div className="stat-list">
+                <div><span>Replies captured</span><strong>{data.replies.length}</strong></div>
+                <div><span>Website enquiries</span><strong>{data.website.length}</strong></div>
+              </div>
+            </Panel>
+          </main>
+        ) : null}
+        {page === "pipeline" || page === "areas" ? (
+          <main>
+            {page === "pipeline" ? (
+              <Panel title="Daily Send Queue" meta="Ready prospects" className="span-12">
+                <div className="table-wrap">
+                  <table>
+                    <thead><tr><th>Rank</th><th>Company</th><th>Email</th><th>Borough</th><th>Hook</th></tr></thead>
+                    <tbody>
+                      {stats.readyQueue.map((row, index) => (
+                        <tr key={`${emailOf(row)}-${index}`}>
+                          <td>{index + 1}</td>
+                          <td><strong>{companyOf(row) || "Unknown"}</strong></td>
+                          <td>{emailOf(row)}</td>
+                          <td>{field(row, ["borough", "area", "Area"]) || "-"}</td>
+                          <td>{field(row, ["subject", "notes", "status"]) || "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Panel>
+            ) : (
+              <Panel title="Areas" meta="Ready queue" className="span-12">
+                <div className="legend">
+                  {stats.boroughData.map((row, index) => <span key={row.name}><i style={{ background: palette[index % palette.length] }} />{row.name} {row.value}</span>)}
+                </div>
+              </Panel>
+            )}
+          </main>
+        ) : null}
+        {page === "revenue" || page === "appointments" || page === "services" ? (
+          <main>
+            <Panel title={pageMeta[2]} meta="From the live CRM payload" className="span-12">
+              <div className="stat-list">
+                <div><span>Booked jobs</span><strong>{crm ? safeNumber(metrics.booked || 0) : "—"}</strong></div>
+                <div><span>Estimated revenue</span><strong>{crm ? money(metrics.estimated_revenue || 0) : "—"}</strong></div>
+                <div><span>Follow-up needed</span><strong>{crm ? safeNumber(metrics.follow_up_needed || 0) : "—"}</strong></div>
+                <div><span>Top service</span><strong>{services[0]?.name || "—"}</strong></div>
+              </div>
+            </Panel>
+          </main>
+        ) : null}
+        {page === "communications" ? (
+          <main>
+            <Panel title="Email Activity" meta="Live API" className="span-12">
+              <div className="stat-list">
+                <div><span>Emails sent</span><strong>{crm ? safeNumber(crm.email_activity?.sent || 0) : "—"}</strong></div>
+                <div><span>Email failures</span><strong>{crm ? safeNumber(crm.email_activity?.failed || 0) : "—"}</strong></div>
+                <div><span>Latest email time</span><strong>{crm?.email_activity?.latest_sent_at || "—"}</strong></div>
+                <div><span>Sheet confirmed sends</span><strong>{stats.realSent.length}</strong></div>
+              </div>
+            </Panel>
+          </main>
+        ) : null}
+        {page === "automation" || page === "system" ? (
+          <main>
+            <Panel title={pageMeta[2]} meta={paused ? "Refresh paused" : "Auto refresh on"} className="span-12">
+              <div className="stat-list">
+                <div><span>Inbound API</span><strong>{statusLabel(sheetsOk)}</strong></div>
+                <div><span>PythonAnywhere</span><strong>{statusLabel(pythonOk)}</strong></div>
+                <div><span>CRM</span><strong>{statusLabel(crmOk)}</strong></div>
+                <div><span>Last refresh</span><strong>{formatRefresh(lastSync)}</strong></div>
+              </div>
+            </Panel>
+          </main>
+        ) : null}
+      </div>
       <ChatWidget />
     </div>
   );
